@@ -16,34 +16,58 @@
 
 package com.android.calendar;
 
+import android.content.ContentResolver;
+import android.content.ContentUris;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.res.Resources;
 import android.database.Cursor;
+import android.net.Uri;
 import android.os.Debug;
-import android.preference.PreferenceManager;
-import android.provider.Calendar.Attendees;
-import android.provider.Calendar.Events;
-import android.provider.Calendar.Instances;
+import android.provider.CalendarContract.Attendees;
+import android.provider.CalendarContract.Calendars;
+import android.provider.CalendarContract.Events;
+import android.provider.CalendarContract.Instances;
 import android.text.TextUtils;
 import android.text.format.DateUtils;
-import android.text.format.Time;
 import android.util.Log;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Iterator;
 import java.util.concurrent.atomic.AtomicInteger;
 
 // TODO: should Event be Parcelable so it can be passed via Intents?
-public class Event implements Comparable<Event>, Cloneable {
+public class Event implements Cloneable {
 
+    private static final String TAG = "CalEvent";
     private static final boolean PROFILE = false;
 
-    private static final String[] PROJECTION = new String[] {
+    /**
+     * The sort order is:
+     * 1) events with an earlier start (begin for normal events, startday for allday)
+     * 2) events with a later end (end for normal events, endday for allday)
+     * 3) the title (unnecessary, but nice)
+     *
+     * The start and end day is sorted first so that all day events are
+     * sorted correctly with respect to events that are >24 hours (and
+     * therefore show up in the allday area).
+     */
+    private static final String SORT_EVENTS_BY =
+            "begin ASC, end DESC, title ASC";
+    private static final String SORT_ALLDAY_BY =
+            "startDay ASC, endDay DESC, title ASC";
+    private static final String DISPLAY_AS_ALLDAY = "dispAllday";
+
+    private static final String EVENTS_WHERE = DISPLAY_AS_ALLDAY + "=0";
+    private static final String ALLDAY_WHERE = DISPLAY_AS_ALLDAY + "=1";
+
+    // The projection to use when querying instances to build a list of events
+    public static final String[] EVENT_PROJECTION = new String[] {
             Instances.TITLE,                 // 0
             Instances.EVENT_LOCATION,        // 1
             Instances.ALL_DAY,               // 2
-            Instances.COLOR,                 // 3
+            Instances.DISPLAY_COLOR,         // 3 If SDK < 16, set to Instances.CALENDAR_COLOR.
             Instances.EVENT_TIMEZONE,        // 4
             Instances.EVENT_ID,              // 5
             Instances.BEGIN,                 // 6
@@ -59,6 +83,8 @@ public class Event implements Comparable<Event>, Cloneable {
             Instances.SELF_ATTENDEE_STATUS,  // 16
             Events.ORGANIZER,                // 17
             Events.GUESTS_CAN_MODIFY,        // 18
+            Instances.ALL_DAY + "=1 OR (" + Instances.END + "-" + Instances.BEGIN + ")>="
+                    + DateUtils.DAY_IN_MILLIS + " AS " + DISPLAY_AS_ALLDAY, // 19
     };
 
     // The indices for the projection array above.
@@ -80,6 +106,16 @@ public class Event implements Comparable<Event>, Cloneable {
     private static final int PROJECTION_SELF_ATTENDEE_STATUS_INDEX = 16;
     private static final int PROJECTION_ORGANIZER_INDEX = 17;
     private static final int PROJECTION_GUESTS_CAN_INVITE_OTHERS_INDEX = 18;
+    private static final int PROJECTION_DISPLAY_AS_ALLDAY = 19;
+
+    static {
+        if (!Utils.isJellybeanOrLater()) {
+            EVENT_PROJECTION[PROJECTION_COLOR_INDEX] = Instances.CALENDAR_COLOR;
+        }
+    }
+
+    private static String mNoTitleString;
+    private static int mNoColorColor;
 
     public long id;
     public int color;
@@ -101,7 +137,7 @@ public class Event implements Comparable<Event>, Cloneable {
 
     public boolean hasAlarm;
     public boolean isRepeating;
-    
+
     public int selfAttendeeStatus;
 
     // The coordinates of the event rectangle drawn on the screen.
@@ -182,107 +218,24 @@ public class Event implements Comparable<Event>, Cloneable {
     }
 
     /**
-     * Compares this event to the given event.  This is just used for checking
-     * if two events differ.  It's not used for sorting anymore.
+     * Loads <i>days</i> days worth of instances starting at <i>startDay</i>.
      */
-    public final int compareTo(Event obj) {
-        // The earlier start day and time comes first
-        if (startDay < obj.startDay) return -1;
-        if (startDay > obj.startDay) return 1;
-        if (startTime < obj.startTime) return -1;
-        if (startTime > obj.startTime) return 1;
-
-        // The later end time comes first (in order to put long strips on
-        // the left).
-        if (endDay < obj.endDay) return 1;
-        if (endDay > obj.endDay) return -1;
-        if (endTime < obj.endTime) return 1;
-        if (endTime > obj.endTime) return -1;
-
-        // Sort all-day events before normal events.
-        if (allDay && !obj.allDay) return -1;
-        if (!allDay && obj.allDay) return 1;
-
-        if (guestsCanModify && !obj.guestsCanModify) return -1;
-        if (!guestsCanModify && obj.guestsCanModify) return 1;
-
-        // If two events have the same time range, then sort them in
-        // alphabetical order based on their titles.
-        int cmp = compareStrings(title, obj.title);
-        if (cmp != 0) {
-            return cmp;
-        }
-
-        // If the titles are the same then compare the other fields
-        // so that we can use this function to check for differences
-        // between events.
-        cmp = compareStrings(location, obj.location);
-        if (cmp != 0) {
-            return cmp;
-        }
-
-        cmp = compareStrings(organizer, obj.organizer);
-        if (cmp != 0) {
-            return cmp;
-        }
-        return 0;
-    }
-
-    /**
-     * Compare string a with string b, but if either string is null,
-     * then treat it (the null) as if it were the empty string ("").
-     *
-     * @param a the first string
-     * @param b the second string
-     * @return the result of comparing a with b after replacing null
-     *  strings with "".
-     */
-    private int compareStrings(CharSequence a, CharSequence b) {
-        String aStr, bStr;
-        if (a != null) {
-            aStr = a.toString();
-        } else {
-            aStr = "";
-        }
-        if (b != null) {
-            bStr = b.toString();
-        } else {
-            bStr = "";
-        }
-        return aStr.compareTo(bStr);
-    }
-
-    /**
-     * Loads <i>days</i> days worth of instances starting at <i>start</i>.
-     */
-    public static void loadEvents(Context context, ArrayList<Event> events,
-            long start, int days, int requestId, AtomicInteger sequenceNumber) {
+    public static void loadEvents(Context context, ArrayList<Event> events, int startDay, int days,
+            int requestId, AtomicInteger sequenceNumber) {
 
         if (PROFILE) {
             Debug.startMethodTracing("loadEvents");
         }
 
-        Cursor c = null;
+        Cursor cEvents = null;
+        Cursor cAllday = null;
 
         events.clear();
         try {
-            Time local = new Time();
-            int count;
+            int endDay = startDay + days - 1;
 
-            local.set(start);
-            int startDay = Time.getJulianDay(start, local.gmtoff);
-            int endDay = startDay + days;
-
-            local.monthDay += days;
-            long end = local.normalize(true /* ignore isDst */);
-
-            // Widen the time range that we query by one day on each end
-            // so that we can catch all-day events.  All-day events are
-            // stored starting at midnight in UTC but should be included
-            // in the list of events starting at midnight local time.
-            // This may fetch more events than we actually want, so we
-            // filter them out below.
-            //
+            // We use the byDay instances query to get a list of all events for
+            // the days we're interested in.
             // The sort order is: events with an earlier start time occur
             // first and if the start times are the same, then events with
             // a later end time occur first. The later end time is ordered
@@ -291,25 +244,24 @@ public class Event implements Comparable<Event>, Cloneable {
             // the same then we sort alphabetically on the title.  This isn't
             // required for correctness, it just adds a nice touch.
 
-            String orderBy = Instances.SORT_CALENDAR_VIEW;
-
             // Respect the preference to show/hide declined events
-            SharedPreferences prefs = CalendarPreferenceActivity.getSharedPreferences(context);
-            boolean hideDeclined = prefs.getBoolean(CalendarPreferenceActivity.KEY_HIDE_DECLINED,
+            SharedPreferences prefs = GeneralPreferences.getSharedPreferences(context);
+            boolean hideDeclined = prefs.getBoolean(GeneralPreferences.KEY_HIDE_DECLINED,
                     false);
 
-            String where = null;
+            String where = EVENTS_WHERE;
+            String whereAllday = ALLDAY_WHERE;
             if (hideDeclined) {
-                where = Instances.SELF_ATTENDEE_STATUS + "!=" + Attendees.ATTENDEE_STATUS_DECLINED;
+                String hideString = " AND " + Instances.SELF_ATTENDEE_STATUS + "!="
+                        + Attendees.ATTENDEE_STATUS_DECLINED;
+                where += hideString;
+                whereAllday += hideString;
             }
 
-            c = Instances.query(context.getContentResolver(), PROJECTION,
-                    start - DateUtils.DAY_IN_MILLIS, end + DateUtils.DAY_IN_MILLIS, where, orderBy);
-
-            if (c == null) {
-                Log.e("Cal", "loadEvents() returned null cursor!");
-                return;
-            }
+            cEvents = instancesQuery(context.getContentResolver(), EVENT_PROJECTION, startDay,
+                    endDay, where, null, SORT_EVENTS_BY);
+            cAllday = instancesQuery(context.getContentResolver(), EVENT_PROJECTION, startDay,
+                    endDay, whereAllday, null, SORT_ALLDAY_BY);
 
             // Check if we should return early because there are more recent
             // load requests waiting.
@@ -317,76 +269,152 @@ public class Event implements Comparable<Event>, Cloneable {
                 return;
             }
 
-            count = c.getCount();
+            buildEventsFromCursor(events, cEvents, context, startDay, endDay);
+            buildEventsFromCursor(events, cAllday, context, startDay, endDay);
 
-            if (count == 0) {
-                return;
-            }
-
-            Resources res = context.getResources();
-            while (c.moveToNext()) {
-                Event e = new Event();
-
-                e.id = c.getLong(PROJECTION_EVENT_ID_INDEX);
-                e.title = c.getString(PROJECTION_TITLE_INDEX);
-                e.location = c.getString(PROJECTION_LOCATION_INDEX);
-                e.allDay = c.getInt(PROJECTION_ALL_DAY_INDEX) != 0;
-                e.organizer = c.getString(PROJECTION_ORGANIZER_INDEX);
-                e.guestsCanModify = c.getInt(PROJECTION_GUESTS_CAN_INVITE_OTHERS_INDEX) != 0;
-
-                String timezone = c.getString(PROJECTION_TIMEZONE_INDEX);
-
-                if (e.title == null || e.title.length() == 0) {
-                    e.title = res.getString(R.string.no_title_label);
-                }
-
-                if (!c.isNull(PROJECTION_COLOR_INDEX)) {
-                    // Read the color from the database
-                    e.color = c.getInt(PROJECTION_COLOR_INDEX);
-                } else {
-                    e.color = res.getColor(R.color.event_center);
-                }
-
-                long eStart = c.getLong(PROJECTION_BEGIN_INDEX);
-                long eEnd = c.getLong(PROJECTION_END_INDEX);
-
-                e.startMillis = eStart;
-                e.startTime = c.getInt(PROJECTION_START_MINUTE_INDEX);
-                e.startDay = c.getInt(PROJECTION_START_DAY_INDEX);
-
-                e.endMillis = eEnd;
-                e.endTime = c.getInt(PROJECTION_END_MINUTE_INDEX);
-                e.endDay = c.getInt(PROJECTION_END_DAY_INDEX);
-
-                if (e.startDay > endDay || e.endDay < startDay) {
-                    continue;
-                }
-
-                e.hasAlarm = c.getInt(PROJECTION_HAS_ALARM_INDEX) != 0;
-
-                // Check if this is a repeating event
-                String rrule = c.getString(PROJECTION_RRULE_INDEX);
-                String rdate = c.getString(PROJECTION_RDATE_INDEX);
-                if (!TextUtils.isEmpty(rrule) || !TextUtils.isEmpty(rdate)) {
-                    e.isRepeating = true;
-                } else {
-                    e.isRepeating = false;
-                }
-                
-                e.selfAttendeeStatus = c.getInt(PROJECTION_SELF_ATTENDEE_STATUS_INDEX);
-
-                events.add(e);
-            }
-
-            computePositions(events);
         } finally {
-            if (c != null) {
-                c.close();
+            if (cEvents != null) {
+                cEvents.close();
+            }
+            if (cAllday != null) {
+                cAllday.close();
             }
             if (PROFILE) {
                 Debug.stopMethodTracing();
             }
         }
+    }
+
+    /**
+     * Performs a query to return all visible instances in the given range
+     * that match the given selection. This is a blocking function and
+     * should not be done on the UI thread. This will cause an expansion of
+     * recurring events to fill this time range if they are not already
+     * expanded and will slow down for larger time ranges with many
+     * recurring events.
+     *
+     * @param cr The ContentResolver to use for the query
+     * @param projection The columns to return
+     * @param begin The start of the time range to query in UTC millis since
+     *            epoch
+     * @param end The end of the time range to query in UTC millis since
+     *            epoch
+     * @param selection Filter on the query as an SQL WHERE statement
+     * @param selectionArgs Args to replace any '?'s in the selection
+     * @param orderBy How to order the rows as an SQL ORDER BY statement
+     * @return A Cursor of instances matching the selection
+     */
+    private static final Cursor instancesQuery(ContentResolver cr, String[] projection,
+            int startDay, int endDay, String selection, String[] selectionArgs, String orderBy) {
+        String WHERE_CALENDARS_SELECTED = Calendars.VISIBLE + "=?";
+        String[] WHERE_CALENDARS_ARGS = {"1"};
+        String DEFAULT_SORT_ORDER = "begin ASC";
+
+        Uri.Builder builder = Instances.CONTENT_BY_DAY_URI.buildUpon();
+        ContentUris.appendId(builder, startDay);
+        ContentUris.appendId(builder, endDay);
+        if (TextUtils.isEmpty(selection)) {
+            selection = WHERE_CALENDARS_SELECTED;
+            selectionArgs = WHERE_CALENDARS_ARGS;
+        } else {
+            selection = "(" + selection + ") AND " + WHERE_CALENDARS_SELECTED;
+            if (selectionArgs != null && selectionArgs.length > 0) {
+                selectionArgs = Arrays.copyOf(selectionArgs, selectionArgs.length + 1);
+                selectionArgs[selectionArgs.length - 1] = WHERE_CALENDARS_ARGS[0];
+            } else {
+                selectionArgs = WHERE_CALENDARS_ARGS;
+            }
+        }
+        return cr.query(builder.build(), projection, selection, selectionArgs,
+                orderBy == null ? DEFAULT_SORT_ORDER : orderBy);
+    }
+
+    /**
+     * Adds all the events from the cursors to the events list.
+     *
+     * @param events The list of events
+     * @param cEvents Events to add to the list
+     * @param context
+     * @param startDay
+     * @param endDay
+     */
+    public static void buildEventsFromCursor(
+            ArrayList<Event> events, Cursor cEvents, Context context, int startDay, int endDay) {
+        if (cEvents == null || events == null) {
+            Log.e(TAG, "buildEventsFromCursor: null cursor or null events list!");
+            return;
+        }
+
+        int count = cEvents.getCount();
+
+        if (count == 0) {
+            return;
+        }
+
+        Resources res = context.getResources();
+        mNoTitleString = res.getString(R.string.no_title_label);
+        mNoColorColor = res.getColor(R.color.event_center);
+        // Sort events in two passes so we ensure the allday and standard events
+        // get sorted in the correct order
+        cEvents.moveToPosition(-1);
+        while (cEvents.moveToNext()) {
+            Event e = generateEventFromCursor(cEvents);
+            if (e.startDay > endDay || e.endDay < startDay) {
+                continue;
+            }
+            events.add(e);
+        }
+    }
+
+    /**
+     * @param cEvents Cursor pointing at event
+     * @return An event created from the cursor
+     */
+    private static Event generateEventFromCursor(Cursor cEvents) {
+        Event e = new Event();
+
+        e.id = cEvents.getLong(PROJECTION_EVENT_ID_INDEX);
+        e.title = cEvents.getString(PROJECTION_TITLE_INDEX);
+        e.location = cEvents.getString(PROJECTION_LOCATION_INDEX);
+        e.allDay = cEvents.getInt(PROJECTION_ALL_DAY_INDEX) != 0;
+        e.organizer = cEvents.getString(PROJECTION_ORGANIZER_INDEX);
+        e.guestsCanModify = cEvents.getInt(PROJECTION_GUESTS_CAN_INVITE_OTHERS_INDEX) != 0;
+
+        if (e.title == null || e.title.length() == 0) {
+            e.title = mNoTitleString;
+        }
+
+        if (!cEvents.isNull(PROJECTION_COLOR_INDEX)) {
+            // Read the color from the database
+            e.color = Utils.getDisplayColorFromColor(cEvents.getInt(PROJECTION_COLOR_INDEX));
+        } else {
+            e.color = mNoColorColor;
+        }
+
+        long eStart = cEvents.getLong(PROJECTION_BEGIN_INDEX);
+        long eEnd = cEvents.getLong(PROJECTION_END_INDEX);
+
+        e.startMillis = eStart;
+        e.startTime = cEvents.getInt(PROJECTION_START_MINUTE_INDEX);
+        e.startDay = cEvents.getInt(PROJECTION_START_DAY_INDEX);
+
+        e.endMillis = eEnd;
+        e.endTime = cEvents.getInt(PROJECTION_END_MINUTE_INDEX);
+        e.endDay = cEvents.getInt(PROJECTION_END_DAY_INDEX);
+
+        e.hasAlarm = cEvents.getInt(PROJECTION_HAS_ALARM_INDEX) != 0;
+
+        // Check if this is a repeating event
+        String rrule = cEvents.getString(PROJECTION_RRULE_INDEX);
+        String rdate = cEvents.getString(PROJECTION_RDATE_INDEX);
+        if (!TextUtils.isEmpty(rrule) || !TextUtils.isEmpty(rdate)) {
+            e.isRepeating = true;
+        } else {
+            e.isRepeating = false;
+        }
+
+        e.selfAttendeeStatus = cEvents.getInt(PROJECTION_SELF_ATTENDEE_STATUS_INDEX);
+        return e;
     }
 
     /**
@@ -401,57 +429,41 @@ public class Event implements Comparable<Event>, Cloneable {
      * the same time.
      *
      * @param eventsList the list of events, sorted into increasing time order
+     * @param minimumDurationMillis minimum duration acceptable as cell height of each event
+     * rectangle in millisecond. Should be 0 when it is not determined.
      */
-    private static void computePositions(ArrayList<Event> eventsList) {
-        if (eventsList == null)
+    /* package */ static void computePositions(ArrayList<Event> eventsList,
+            long minimumDurationMillis) {
+        if (eventsList == null) {
             return;
+        }
 
         // Compute the column positions separately for the all-day events
-        doComputePositions(eventsList, false);
-        doComputePositions(eventsList, true);
+        doComputePositions(eventsList, minimumDurationMillis, false);
+        doComputePositions(eventsList, minimumDurationMillis, true);
     }
 
     private static void doComputePositions(ArrayList<Event> eventsList,
-            boolean doAllDayEvents) {
-        ArrayList<Event> activeList = new ArrayList<Event>();
-        ArrayList<Event> groupList = new ArrayList<Event>();
+            long minimumDurationMillis, boolean doAlldayEvents) {
+        final ArrayList<Event> activeList = new ArrayList<Event>();
+        final ArrayList<Event> groupList = new ArrayList<Event>();
+
+        if (minimumDurationMillis < 0) {
+            minimumDurationMillis = 0;
+        }
 
         long colMask = 0;
         int maxCols = 0;
         for (Event event : eventsList) {
             // Process all-day events separately
-            if (event.allDay != doAllDayEvents)
+            if (event.drawAsAllday() != doAlldayEvents)
                 continue;
 
-            long start = event.getStartMillis();
-            if (false && event.allDay) {
-                Event e = event;
-                Log.i("Cal", "event start,end day: " + e.startDay + "," + e.endDay
-                        + " start,end time: " + e.startTime + "," + e.endTime
-                        + " start,end millis: " + e.getStartMillis() + "," + e.getEndMillis()
-                        + " "  + e.title);
-            }
-
-            // Remove the inactive events.
-            // An event on the active list becomes inactive when its end time + margin time is less
-            // than or equal to the current event's start time. For more information about
-            // the margin time, see the comment in EVENT_OVERWRAP_MARGIN_TIME.
-            Iterator<Event> iter = activeList.iterator();
-            while (iter.hasNext()) {
-                Event active = iter.next();
-                final long duration = Math.max(active.getEndMillis() - active.getStartMillis(),
-                        CalendarView.EVENT_OVERWRAP_MARGIN_TIME);
-                if ((active.getStartMillis() + duration) <= start) {
-                    if (false && event.allDay) {
-                        Event e = active;
-                        Log.i("Cal", "  removing: start,end day: " + e.startDay + "," + e.endDay
-                                + " start,end time: " + e.startTime + "," + e.endTime
-                                + " start,end millis: " + e.getStartMillis() + "," + e.getEndMillis()
-                                + " "  + e.title);
-                    }
-                    colMask &= ~(1L << active.getColumn());
-                    iter.remove();
-                }
+           if (!doAlldayEvents) {
+                colMask = removeNonAlldayActiveEvents(
+                        event, activeList.iterator(), minimumDurationMillis, colMask);
+            } else {
+                colMask = removeAlldayActiveEvents(event, activeList.iterator(), colMask);
             }
 
             // If the active list is empty, then reset the max columns, clear
@@ -483,69 +495,45 @@ public class Event implements Comparable<Event>, Cloneable {
         }
     }
 
+    private static long removeAlldayActiveEvents(Event event, Iterator<Event> iter, long colMask) {
+        // Remove the inactive allday events. An event on the active list
+        // becomes inactive when the end day is less than the current event's
+        // start day.
+        while (iter.hasNext()) {
+            final Event active = iter.next();
+            if (active.endDay < event.startDay) {
+                colMask &= ~(1L << active.getColumn());
+                iter.remove();
+            }
+        }
+        return colMask;
+    }
+
+    private static long removeNonAlldayActiveEvents(
+            Event event, Iterator<Event> iter, long minDurationMillis, long colMask) {
+        long start = event.getStartMillis();
+        // Remove the inactive events. An event on the active list
+        // becomes inactive when its end time is less than or equal to
+        // the current event's start time.
+        while (iter.hasNext()) {
+            final Event active = iter.next();
+
+            final long duration = Math.max(
+                    active.getEndMillis() - active.getStartMillis(), minDurationMillis);
+            if ((active.getStartMillis() + duration) <= start) {
+                colMask &= ~(1L << active.getColumn());
+                iter.remove();
+            }
+        }
+        return colMask;
+    }
+
     public static int findFirstZeroBit(long val) {
         for (int ii = 0; ii < 64; ++ii) {
             if ((val & (1L << ii)) == 0)
                 return ii;
         }
         return 64;
-    }
-
-    /**
-     * Returns a darker version of the given color.  It does this by dividing
-     * each of the red, green, and blue components by 2.  The alpha value is
-     * preserved.
-     */
-    private static final int getDarkerColor(int color) {
-        int darker = (color >> 1) & 0x007f7f7f;
-        int alpha = color & 0xff000000;
-        return alpha | darker;
-    }
-
-    // For testing. This method can be removed at any time.
-    private static ArrayList<Event> createTestEventList() {
-        ArrayList<Event> evList = new ArrayList<Event>();
-        createTestEvent(evList, 1, 5, 10);
-        createTestEvent(evList, 2, 5, 10);
-        createTestEvent(evList, 3, 15, 20);
-        createTestEvent(evList, 4, 20, 25);
-        createTestEvent(evList, 5, 30, 70);
-        createTestEvent(evList, 6, 32, 40);
-        createTestEvent(evList, 7, 32, 40);
-        createTestEvent(evList, 8, 34, 38);
-        createTestEvent(evList, 9, 34, 38);
-        createTestEvent(evList, 10, 42, 50);
-        createTestEvent(evList, 11, 45, 60);
-        createTestEvent(evList, 12, 55, 90);
-        createTestEvent(evList, 13, 65, 75);
-
-        createTestEvent(evList, 21, 105, 130);
-        createTestEvent(evList, 22, 110, 120);
-        createTestEvent(evList, 23, 115, 130);
-        createTestEvent(evList, 24, 125, 140);
-        createTestEvent(evList, 25, 127, 135);
-
-        createTestEvent(evList, 31, 150, 160);
-        createTestEvent(evList, 32, 152, 162);
-        createTestEvent(evList, 33, 153, 163);
-        createTestEvent(evList, 34, 155, 170);
-        createTestEvent(evList, 35, 158, 175);
-        createTestEvent(evList, 36, 165, 180);
-
-        return evList;
-    }
-
-    // For testing. This method can be removed at any time.
-    private static Event createTestEvent(ArrayList<Event> evList, int id,
-            int startMinute, int endMinute) {
-        Event ev = new Event();
-        ev.title = "ev" + id;
-        ev.startDay = 1;
-        ev.endDay = 1;
-        ev.setStartMillis(startMinute);
-        ev.setEndMillis(endMinute);
-        evList.add(ev);
-        return ev;
     }
 
     public final void dump() {
@@ -645,5 +633,10 @@ public class Event implements Comparable<Event>, Cloneable {
 
     public long getEndMillis() {
         return endMillis;
+    }
+
+    public boolean drawAsAllday() {
+        // Use >= so we'll pick up Exchange allday events
+        return allDay || endMillis - startMillis >= DateUtils.DAY_IN_MILLIS;
     }
 }

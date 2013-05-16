@@ -21,7 +21,8 @@ import android.content.Context;
 import android.database.Cursor;
 import android.os.Handler;
 import android.os.Process;
-import android.provider.Calendar.EventDays;
+import android.provider.CalendarContract;
+import android.provider.CalendarContract.EventDays;
 import android.util.Log;
 
 import java.util.ArrayList;
@@ -64,6 +65,13 @@ public class EventLoader {
         public boolean[] eventDays;
         public Runnable uiCallback;
 
+        /**
+         * The projection used by the EventDays query.
+         */
+        private static final String[] PROJECTION = {
+                CalendarContract.EventDays.STARTDAY, CalendarContract.EventDays.ENDDAY
+        };
+
         public LoadEventDaysRequest(int startDay, int numDays, boolean[] eventDays,
                 final Runnable uiCallback)
         {
@@ -73,6 +81,7 @@ public class EventLoader {
             this.uiCallback = uiCallback;
         }
 
+        @Override
         public void processRequest(EventLoader eventLoader)
         {
             final Handler handler = eventLoader.mHandler;
@@ -82,7 +91,7 @@ public class EventLoader {
             Arrays.fill(eventDays, false);
 
             //query which days have events
-            Cursor cursor = EventDays.query(cr, startDay, numDays);
+            Cursor cursor = EventDays.query(cr, startDay, numDays, PROJECTION);
             try {
                 int startDayColumnIndex = cursor.getColumnIndexOrThrow(EventDays.STARTDAY);
                 int endDayColumnIndex = cursor.getColumnIndexOrThrow(EventDays.ENDDAY);
@@ -107,6 +116,7 @@ public class EventLoader {
             handler.post(uiCallback);
         }
 
+        @Override
         public void skipRequest(EventLoader eventLoader) {
         }
     }
@@ -114,16 +124,16 @@ public class EventLoader {
     private static class LoadEventsRequest implements LoadRequest {
 
         public int id;
-        public long startMillis;
+        public int startDay;
         public int numDays;
         public ArrayList<Event> events;
         public Runnable successCallback;
         public Runnable cancelCallback;
 
-        public LoadEventsRequest(int id, long startMillis, int numDays, ArrayList<Event> events,
+        public LoadEventsRequest(int id, int startDay, int numDays, ArrayList<Event> events,
                 final Runnable successCallback, final Runnable cancelCallback) {
             this.id = id;
-            this.startMillis = startMillis;
+            this.startDay = startDay;
             this.numDays = numDays;
             this.events = events;
             this.successCallback = successCallback;
@@ -131,7 +141,7 @@ public class EventLoader {
         }
 
         public void processRequest(EventLoader eventLoader) {
-            Event.loadEvents(eventLoader.mContext, events, startMillis,
+            Event.loadEvents(eventLoader.mContext, events, startDay,
                     numDays, id, eventLoader.mSequenceNumber);
 
             // Check if we are still the most recent request.
@@ -226,8 +236,8 @@ public class EventLoader {
      * created are used, and the most recent call's worth of data is loaded into events and posted
      * via the uiCallback.
      */
-    void loadEventsInBackground(final int numDays, final ArrayList<Event> events,
-            long start, final Runnable successCallback, final Runnable cancelCallback) {
+    public void loadEventsInBackground(final int numDays, final ArrayList<Event> events,
+            int startDay, final Runnable successCallback, final Runnable cancelCallback) {
 
         // Increment the sequence number for requests.  We don't care if the
         // sequence numbers wrap around because we test for equality with the
@@ -235,7 +245,7 @@ public class EventLoader {
         int id = mSequenceNumber.incrementAndGet();
 
         // Send the load request to the background thread
-        LoadEventsRequest request = new LoadEventsRequest(id, start, numDays,
+        LoadEventsRequest request = new LoadEventsRequest(id, startDay, numDays,
                 events, successCallback, cancelCallback);
 
         try {

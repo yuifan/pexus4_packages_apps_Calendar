@@ -31,22 +31,22 @@ public class EventGeometry {
         mCellMargin = cellMargin;
     }
 
-    void setHourGap(float gap) {
+    public void setHourGap(float gap) {
         mHourGap = gap;
     }
 
-    void setMinEventHeight(float height) {
+    public void setMinEventHeight(float height) {
         mMinEventHeight = height;
     }
 
-    void setHourHeight(float height) {
+    public void setHourHeight(float height) {
         mMinuteHeight = height / 60.0f;
     }
 
     // Computes the rectangle coordinates of the given event on the screen.
     // Returns true if the rectangle is visible on the screen.
-    boolean computeEventRect(int date, int left, int top, int cellWidth, Event event) {
-        if (event.allDay) {
+    public boolean computeEventRect(int date, int left, int top, int cellWidth, Event event) {
+        if (event.drawAsAllday()) {
             return false;
         }
 
@@ -70,7 +70,7 @@ public class EventGeometry {
         // If the event ends on a future day, then show it extending to
         // the end of this day.
         if (endDay > date) {
-            endTime = CalendarView.MINUTES_PER_DAY;
+            endTime = DayView.MINUTES_PER_DAY;
         }
 
         int col = event.getColumn();
@@ -90,15 +90,15 @@ public class EventGeometry {
 
         event.bottom = top;
         event.bottom += (int) (endTime * cellMinuteHeight);
-        event.bottom += endHour * mHourGap;
+        event.bottom += endHour * mHourGap - 1;
 
         // Make the rectangle be at least mMinEventHeight pixels high
         if (event.bottom < event.top + mMinEventHeight) {
             event.bottom = event.top + mMinEventHeight;
         }
 
-        float colWidth = (float) (cellWidth - 2 * mCellMargin) / (float) maxCols;
-        event.left = left + mCellMargin + col * colWidth;
+        float colWidth = (float) (cellWidth - (maxCols + 1) * mCellMargin) / (float) maxCols;
+        event.left = left + col * (colWidth + mCellMargin);
         event.right = event.left + colWidth;
         return true;
     }

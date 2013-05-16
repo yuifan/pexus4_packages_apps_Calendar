@@ -13,12 +13,35 @@
      See the License for the specific language governing permissions and
      limitations under the License.
 -->
-
 <resources>
+    <!-- Choices for the "Reminder method" spinner.
+         These must be kept in sync with the reminder_methods_values array.
+         [CHAR LIMIT=10]
+    -->
+    <string-array name="reminder_methods_labels">
+        <item>Notification</item>
+        <item>Email</item>
+        <item>SMS</item>
+        <item>Alarm</item>
+    </string-array>
+
+    <!-- This maps reminder_methods_labels to internal constants. -->
+    <integer-array name="reminder_methods_values" translatable="false">
+        <item>1</item>  <!-- METHOD_ALERT -->
+        <item>2</item>  <!-- METHOD_EMAIL -->
+        <item>3</item>  <!-- METHOD_SMS -->
+        <item>4</item>  <!-- METHOD_ALARM -->
+    </integer-array>
+
     <!-- Choices for the "Reminder minutes" spinner.
          These must be kept in sync with the reminder_minutes_values array.
+         For consistency, the format should match what
+         EventViewUtils.constructReminderLabel() generates.  (TODO: eliminate
+         this and just generate the list from reminder_minutes_values?)
+         [CHAR LIMIT=15]
     -->
     <string-array name="reminder_minutes_labels">
+        <item>0 minutes</item>
         <item>1 minute</item>
         <item>5 minutes</item>
         <item>10 minutes</item>
@@ -36,7 +59,52 @@
         <item>1 week</item>
     </string-array>
 
-    <string-array name="reminder_minutes_values" translatable="false">
+    <integer-array name="reminder_minutes_values" translatable="false">
+        <item>0</item>
+        <item>1</item>
+        <item>5</item>
+        <item>10</item>
+        <item>15</item>
+        <item>20</item>
+        <item>25</item>
+        <item>30</item>
+        <item>45</item>
+        <item>60</item>
+        <item>120</item>
+        <item>180</item>
+        <item>720</item>
+        <item>1440</item>
+        <item>2880</item>
+        <item>10080</item>
+    </integer-array>
+
+  <!-- Choices for the "Reminder minutes" spinner in the settings.
+         These must be kept in sync with the preferences_default_reminder_values array.
+         [CHAR LIMIT=12]
+    -->
+       <string-array name="preferences_default_reminder_labels">
+        <item>None</item>
+        <item>0 minutes</item>
+        <item>1 minute</item>
+        <item>5 minutes</item>
+        <item>10 minutes</item>
+        <item>15 minutes</item>
+        <item>20 minutes</item>
+        <item>25 minutes</item>
+        <item>30 minutes</item>
+        <item>45 minutes</item>
+        <item>1 hour</item>
+        <item>2 hours</item>
+        <item>3 hours</item>
+        <item>12 hours</item>
+        <item>24 hours</item>
+        <item>2 days</item>
+        <item>1 week</item>
+    </string-array>
+
+    <string-array name="preferences_default_reminder_values" translatable="false">
+        <item>"-1"</item>
+        <item>"0"</item>
         <item>"1"</item>
         <item>"5"</item>
         <item>"10"</item>
@@ -54,8 +122,24 @@
         <item>"10080"</item>
     </string-array>
 
+    <string-array name="preferences_week_start_day_labels">
+        <item>Locale default</item>
+        <item>Saturday</item>
+        <item>Sunday</item>
+        <item>Monday</item>
+    </string-array>
+
+    <string-array name="preferences_week_start_day_values" translatable="false">
+        <item>"-1"</item>
+        <item>"7"</item>
+        <item>"1"</item>
+        <item>"2"</item>
+    </string-array>
+
     <!-- Choices for timezones, must be kept in sync with timezone_values. This
-         list was taken from package/apps/Settings/res/xml/timezones.xml -->
+         list was taken from packages/apps/Settings/res/xml/timezones.xml
+         sed -e 's/^.*">/        <item>"/;s,</.*$,"</item>,' packages/apps/Settings/res/xml/timezones.xml
+         [CHAR LIMIT=25] -->
     <string-array name="timezone_labels">
         <item>"Marshall Islands"</item>
         <item>"Midway Island"</item>
@@ -73,11 +157,13 @@
         <item>"Bogota"</item>
         <item>"Eastern Time"</item>
         <item>"Venezuela"</item>
-        <item>"Atlantic Time"</item>
+        <item>"Atlantic Time (Barbados)"</item>
+        <item>"Atlantic Time (Canada)"</item>
         <item>"Manaus"</item>
         <item>"Santiago"</item>
         <item>"Newfoundland"</item>
-        <item>"Brasilia"</item>
+        <item>"Brasilia Time (Recife)"</item>
+        <item>"Brasilia Time (Sao Paulo)"</item>
         <item>"Buenos Aires"</item>
         <item>"Greenland"</item>
         <item>"Montevideo"</item>
@@ -90,7 +176,6 @@
         <item>"Belgrade"</item>
         <item>"Brussels"</item>
         <item>"Sarajevo"</item>
-        <item>"Paris"</item>
         <item>"Windhoek"</item>
         <item>"W. Africa Time"</item>
         <item>"Amman, Jordan"</item>
@@ -143,7 +228,9 @@
         <item>"Tonga"</item>
     </string-array>
 
-    <!-- This list was taken from package/apps/Settings/res/xml/timezones.xml -->
+    <!-- Choices for timezones, must be kept in sync with timezone_values. This
+         list was taken from packages/apps/Settings/res/xml/timezones.xml
+         sed -e 's/^.*=/        <item>/;s,">.*$,"</item>,' packages/apps/Settings/res/xml/timezones.xml -->
     <string-array name="timezone_values" translatable="false">
         <item>"Pacific/Majuro"</item>
         <item>"Pacific/Midway"</item>
@@ -162,9 +249,11 @@
         <item>"America/New_York"</item>
         <item>"America/Caracas"</item>
         <item>"America/Barbados"</item>
+        <item>"America/Halifax"</item>
         <item>"America/Manaus"</item>
         <item>"America/Santiago"</item>
         <item>"America/St_Johns"</item>
+        <item>"America/Recife"</item>
         <item>"America/Sao_Paulo"</item>
         <item>"America/Argentina/Buenos_Aires"</item>
         <item>"America/Godthab"</item>
@@ -178,7 +267,6 @@
         <item>"Europe/Belgrade"</item>
         <item>"Europe/Brussels"</item>
         <item>"Europe/Sarajevo"</item>
-        <item>"Europe/Paris"</item>
         <item>"Africa/Windhoek"</item>
         <item>"Africa/Brazzaville"</item>
         <item>"Asia/Amman"</item>
@@ -231,60 +319,18 @@
         <item>"Pacific/Tongatapu"</item>
     </string-array>
 
-    <string-array name="preferences_default_reminder_labels">
-        <item>None</item>
-        <item>1 minute</item>
-        <item>5 minutes</item>
-        <item>10 minutes</item>
-        <item>15 minutes</item>
-        <item>20 minutes</item>
-        <item>25 minutes</item>
-        <item>30 minutes</item>
-        <item>45 minutes</item>
-        <item>1 hour</item>
-        <item>2 hours</item>
-        <item>3 hours</item>
-        <item>12 hours</item>
-        <item>24 hours</item>
-        <item>2 days</item>
-        <item>1 week</item>
-    </string-array>
-
-    <string-array name="preferences_default_reminder_values" translatable="false">
-        <item>"0"</item>
-        <item>"1"</item>
-        <item>"5"</item>
-        <item>"10"</item>
-        <item>"15"</item>
-        <item>"20"</item>
-        <item>"25"</item>
-        <item>"30"</item>
-        <item>"45"</item>
-        <item>"60"</item>
-        <item>"120"</item>
-        <item>"180"</item>
-        <item>"720"</item>
-        <item>"1440"</item>
-        <item>"2880"</item>
-        <item>"10080"</item>
-    </string-array>
-
-    <string-array name="preferences_alert_type_labels">
-        <item>Alert</item>
-        <item>Status bar notification</item>
-        <item>Off</item>
-    </string-array>
-
-    <string-array name="preferences_alert_type_values" translatable="false">
-        <item>"0"</item>
-        <item>"1"</item>
-        <item>"2"</item>
-    </string-array>
-
     <string-array name="availability">
         <item>Busy</item>
         <item>Available</item>
+        <item>Tentative</item>
     </string-array>
+
+    <!-- This maps reminder_methods_labels to internal constants. -->
+    <integer-array name="availability_values" translatable="false">
+        <item>0</item>  <!-- Busy -->
+        <item>1</item>  <!-- Available -->
+        <item>2</item>  <!-- Tentative -->
+    </integer-array>
 
     <string-array name="visibility">
         <item>Default</item>
@@ -302,24 +348,30 @@
 
     <!-- Invitation responses -->
     <string-array name="response_labels1">
-        <item>(No response)</item>
-        <item>Yes</item>
-        <item>Maybe</item>
-        <item>No</item>
-    </string-array>
-    <string-array name="response_labels2">
+        <item>No response</item>
         <item>Yes</item>
         <item>Maybe</item>
         <item>No</item>
     </string-array>
 
     <!-- The corresponding indices are defined in DeleteEventHelper.java -->
-    <skip />
+    <!-- This is a list of choices displayed when the user deletes an event.
+         It only is shown when deleting a recurring event.
+    -->
+    <skip/>
     <string-array name="delete_repeating_labels">
         <item>Only this event</item>
-        <item>This &amp; future events</item>
+        <item>This and future events</item>
         <item>All events</item>
     </string-array>
+
+    <!-- DO NOT TRANSLATE These values need to correspond to the indices
+         defined in DeleteEventHelper.java-->
+    <integer-array name="delete_repeating_values">
+        <item>0</item>
+        <item>1</item>
+        <item>2</item>
+    </integer-array>
 
     <!-- The corresponding indices are defined in DeleteEventHelper.java -->
     <!-- This is the same array as above (the "delete_repeating_labels" array,
@@ -328,20 +380,28 @@
          code where you can't delete one instance of a repeating event that
          was created on the phone until that event has been synced to the server.
      -->
-    <skip />
+    <skip/>
     <string-array name="delete_repeating_labels_no_selected">
         <item>This &amp; future events</item>
         <item>All events</item>
     </string-array>
 
     <!-- The corresponding array indices are defined in EventInfoActivity.java -->
-    <skip />
+    <skip/>
     <!-- The list of choices displayed in a dialog box when the user wants to
     respond to an invitation that repeats. -->
     <string-array name="change_response_labels">
         <!-- The choice for responding to only one instance of a repeating event -->
-        <item>Only this instance</item>
+        <item>Only this event</item>
         <!-- The choice for responding to all instances of a repeating event -->
         <item>All events in the series</item>
+    </string-array>
+
+    <!-- Strings for buttons in drop down menu -->
+    <string-array name="buttons_list">
+        <item>Day</item>
+        <item>Week</item>
+        <item>Month</item>
+        <item>Agenda</item>
     </string-array>
 </resources>
